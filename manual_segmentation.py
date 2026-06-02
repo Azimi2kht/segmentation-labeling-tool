@@ -23,7 +23,9 @@ class ManualHSISegmenter:
 
         self.cube = np.load(self.npy_path).astype(np.float32)  # (H, W, B)
         if self.cube.ndim != 3:
-            raise ValueError(f"Expected HSI cube with shape (H, W, B), got {self.cube.shape}")
+            raise ValueError(
+                f"Expected HSI cube with shape (H, W, B), got {self.cube.shape}"
+            )
         self.h, self.w, self.bands = self.cube.shape
 
         # Final mask shared for all bands. 0 = background.
@@ -40,6 +42,8 @@ class ManualHSISegmenter:
         self.undo_stack = []
         self.max_undo_steps = 30
         self.max_labels = 255
+        self.show_mask_overlay = True
+        self.overlay_alpha = 0.55
 
         self.labels: Dict[int, LabelInfo] = {
             0: LabelInfo(0, "background", (0.0, 0.0, 0.0, 0.0))
@@ -58,6 +62,7 @@ class ManualHSISegmenter:
         self.base_im = None
         self.mask_im = None
         self.band_slider = None
+        self.alpha_slider = None
         self._is_updating_slider = False
         self.buttons = {}
         self._draw_initial()
@@ -74,14 +79,20 @@ class ManualHSISegmenter:
         colors = []
         for i in range(max_label + 1):
             if i in self.labels:
-                colors.append(self.labels[i].color)
+                if i == 0:
+                    colors.append((0.0, 0.0, 0.0, 0.0))
+                else:
+                    r, g, b, _a = self.labels[i].color
+                    colors.append((r, g, b, float(self.overlay_alpha)))
             else:
-                colors.append((1.0, 1.0, 1.0, 0.45))
+                # Undefined labels should not render as a visible color (e.g. white borders).
+                colors.append((0.0, 0.0, 0.0, 0.0))
         return ListedColormap(colors)
 
     def _draw_initial(self):
         band_img = self._normalize_band(self.cube[:, :, self.current_band])
-        self.base_im = self.ax.imshow(band_img, cmap="gray", interpolation="nearest")
+        # Visualize with jet colormap (do not modify underlying image data).
+        self.base_im = self.ax.imshow(band_img, cmap="jet", interpolation="nearest")
 
         cmap = self._make_overlay_cmap()
         self.mask_im = self.ax.imshow(
@@ -91,6 +102,7 @@ class ManualHSISegmenter:
             vmax=max(self.labels.keys()),
             interpolation="nearest",
         )
+        self.mask_im.set_visible(self.show_mask_overlay)
         self.ax.set_title(self._title_text())
         self.ax.set_axis_off()
 
@@ -116,10 +128,34 @@ class ManualHSISegmenter:
         )
         self.band_slider.on_changed(self._on_slider_change)
 
-        btn_w = 0.085
+        alpha_ax = self.fig.add_axes([0.28, 0.145, 0.68, 0.03])
+        self.alpha_slider = Slider(
+            ax=alpha_ax,
+            label="Mask Alpha",
+            valmin=0.0,
+            valmax=1.0,
+            valinit=float(self.overlay_alpha),
+            valstep=0.01,
+        )
+        self.alpha_slider.on_changed(self._on_alpha_change)
+
+        # Slightly narrower buttons to fit both "Mask" + "Save".
+        btn_w = 0.075
         btn_h = 0.05
         y = 0.02
-        x_positions = [0.24, 0.315, 0.39, 0.465, 0.54, 0.615, 0.69, 0.765, 0.84, 0.915]
+        x_positions = [
+            0.24,
+            0.305,
+            0.37,
+            0.435,
+            0.50,
+            0.565,
+            0.63,
+            0.695,
+            0.76,
+            0.825,
+            0.89,
+        ]
         specs = [
             ("prev_band", "◀ Band", self._prev_band),
             ("next_band", "Band ▶", self._next_band),
@@ -130,6 +166,7 @@ class ManualHSISegmenter:
             ("add_label", "+ Label", self._add_label_button),
             ("undo", "↶ Undo", self._undo_button),
             ("pan_mode", "Pan Off", self._toggle_pan_mode_button),
+            ("mask_toggle", "Mask On", self._toggle_mask_overlay_button),
             ("save", "Save", self._save_button),
         ]
 
@@ -143,7 +180,9 @@ class ManualHSISegmenter:
         return (
             f"Band {self.current_band + 1}/{self.bands} | "
             f"Label {self.current_label} ({self.labels[self.current_label].name}) | "
-            f"Brush radius={self.brush_radius}px | Pan={'ON' if self.pan_mode else 'OFF'}"
+            f"Brush radius={self.brush_radius}px | "
+            f"Alpha={self.overlay_alpha:.2f} | "
+            f"Pan={'ON' if self.pan_mode else 'OFF'}"
         )
 
     def _shortcut_bullets(self) -> str:
@@ -157,6 +196,7 @@ class ManualHSISegmenter:
                 "- n : add label",
                 "- u : undo",
                 "- m : pan mode",
+                "- v : toggle mask overlay",
                 "- s : save mask",
                 "- q : quit",
                 "- Wheel : zoom in/out",
@@ -169,6 +209,7 @@ class ManualHSISegmenter:
         self.mask_im.set_data(self.mask)
         self.mask_im.set_cmap(self._make_overlay_cmap())
         self.mask_im.set_clim(0, max(self.labels.keys()))
+        self.mask_im.set_visible(self.show_mask_overlay)
         if self.band_slider is not None:
             self._is_updating_slider = True
             self.band_slider.set_val(self.current_band)
@@ -292,6 +333,10 @@ class ManualHSISegmenter:
         self.current_band = int(value)
         self._refresh()
 
+    def _on_alpha_change(self, value):
+        self.overlay_alpha = float(value)
+        self._refresh()
+
     def _prev_band(self, _event=None):
         self.current_band = max(0, self.current_band - 1)
         self._refresh()
@@ -354,17 +399,29 @@ class ManualHSISegmenter:
         self._set_pan_mode(not self.pan_mode)
 
     def _next_label_color(self, label_id: int):
+        # "jet" spans blue→cyan→green→yellow→red. To avoid confusion, prefer
+        # colors that jet does NOT strongly produce (magenta/purple/pink/brown/gray).
+        a = 0.55
         palette = [
-            (1.0, 0.0, 0.0, 0.45),
-            (0.0, 1.0, 0.0, 0.45),
-            (0.0, 0.4, 1.0, 0.45),
-            (1.0, 0.65, 0.0, 0.45),
-            (0.6, 0.2, 1.0, 0.45),
-            (0.0, 0.8, 0.8, 0.45),
-            (1.0, 0.1, 0.6, 0.45),
-            (0.6, 0.6, 0.0, 0.45),
+            (1.00, 0.00, 1.00, a),  # magenta
+            (0.58, 0.00, 0.83, a),  # purple
+            (1.00, 0.08, 0.58, a),  # deep pink
+            (0.35, 0.00, 0.15, a),  # dark maroon
+            (0.55, 0.27, 0.07, a),  # saddle brown
+            (0.25, 0.25, 0.25, a),  # dark gray
+            (0.85, 0.37, 0.00, a),  # burnt orange (less like jet yellow)
+            (0.20, 0.10, 0.60, a),  # indigo
         ]
         return palette[(label_id - 1) % len(palette)]
+
+    def _set_mask_overlay(self, enabled: bool):
+        self.show_mask_overlay = enabled
+        if "mask_toggle" in self.buttons:
+            self.buttons["mask_toggle"].label.set_text("Mask On" if enabled else "Mask Off")
+        self._refresh()
+
+    def _toggle_mask_overlay_button(self, _event=None):
+        self._set_mask_overlay(not self.show_mask_overlay)
 
     def _add_label_interactive(self):
         if max(self.labels.keys()) >= self.max_labels:
@@ -410,6 +467,9 @@ class ManualHSISegmenter:
         elif event.key == "m":
             self._set_pan_mode(not self.pan_mode)
             return
+        elif event.key == "v":
+            self._set_mask_overlay(not self.show_mask_overlay)
+            return
         elif event.key == "s":
             self._save_outputs()
         elif event.key == "q":
@@ -424,7 +484,9 @@ class ManualHSISegmenter:
         self._refresh()
 
     def run(self):
-        print(f"Loaded cube from {self.npy_path} with shape (H={self.h}, W={self.w}, B={self.bands})")
+        print(
+            f"Loaded cube from {self.npy_path} with shape (H={self.h}, W={self.w}, B={self.bands})"
+        )
         print("Manual segmentation started.")
         print("Controls:")
         print("  Left drag = paint current label, Right drag = erase to background")
@@ -432,7 +494,9 @@ class ManualHSISegmenter:
         print("  Slider = jump directly to a specific band/frame")
         print("  +/- = decrease/increase brush radius (0 means single-pixel brush)")
         print("  m = toggle pan mode, u = undo last stroke")
-        print("  Buttons = previous/next band, brush +/- , label +/- , add label, undo, pan mode, save")
+        print(
+            "  Buttons = previous/next band, brush +/- , label +/- , add label, undo, pan mode, save"
+        )
         print("  0..9 = select existing label id")
         print("  n = add new label (auto color)")
         print("  s = save mask only (.npy)")

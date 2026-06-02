@@ -85,7 +85,9 @@ def to_rgb_display(image: np.ndarray) -> np.ndarray:
 
 
 def load_original_image(
-    image_path: Optional[str], expected_shape: tuple[int, int], band_index: Optional[int]
+    image_path: Optional[str],
+    expected_shape: tuple[int, int],
+    band_index: Optional[int],
 ) -> np.ndarray:
     if image_path is None:
         h, w = expected_shape
@@ -122,8 +124,12 @@ class MaskBrowser:
         self.fig, self.axes = plt.subplots(1, 3, figsize=(16, 6))
         self.fig.subplots_adjust(bottom=0.18, wspace=0.06)
 
-        self.prev_button = Button(self.fig.add_axes([0.34, 0.05, 0.12, 0.06]), "Prev [A/Left]")
-        self.next_button = Button(self.fig.add_axes([0.54, 0.05, 0.12, 0.06]), "Next [D/Right]")
+        self.prev_button = Button(
+            self.fig.add_axes([0.34, 0.05, 0.12, 0.06]), "Prev [A/Left]"
+        )
+        self.next_button = Button(
+            self.fig.add_axes([0.54, 0.05, 0.12, 0.06]), "Next [D/Right]"
+        )
         self.prev_button.on_clicked(lambda _event: self.move(-1))
         self.next_button.on_clicked(lambda _event: self.move(+1))
 
@@ -146,7 +152,9 @@ class MaskBrowser:
         sample = self.samples[self.idx]
         mask = np.load(sample.mask_path)
         if mask.ndim != 2:
-            raise ValueError(f"Expected 2D mask, got shape {mask.shape} in {sample.mask_path}")
+            raise ValueError(
+                f"Expected 2D mask, got shape {mask.shape} in {sample.mask_path}"
+            )
 
         unique_labels = np.unique(mask)
         base = load_original_image(sample.image_path, mask.shape, sample.band_index)
@@ -163,11 +171,17 @@ class MaskBrowser:
         self.axes[1].set_title("Mask")
 
         self.axes[2].imshow(base, interpolation="nearest")
-        self.axes[2].imshow(mask, cmap="tab20", interpolation="nearest", alpha=overlay_alpha)
+        self.axes[2].imshow(
+            mask, cmap="tab20", interpolation="nearest", alpha=overlay_alpha
+        )
         self.axes[2].set_title("Overlay")
 
-        image_name = os.path.basename(sample.image_path) if sample.image_path else "not found"
-        band_text = f"band={sample.band_index}" if sample.band_index is not None else "band=n/a"
+        image_name = (
+            os.path.basename(sample.image_path) if sample.image_path else "not found"
+        )
+        band_text = (
+            f"band={sample.band_index}" if sample.band_index is not None else "band=n/a"
+        )
         fig_title = (
             f"[{self.idx + 1}/{len(self.samples)}] mask={os.path.basename(sample.mask_path)} | "
             f"image={image_name} | {band_text} | shape={mask.shape} | labels={unique_labels[:15]}"
@@ -229,9 +243,15 @@ def main():
                 band_index=band_index,
             )
         )
-    missing_images = [s.mask_path for s in samples if s.image_path is None and args.images_dir is not None]
+    missing_images = [
+        s.mask_path
+        for s in samples
+        if s.image_path is None and args.images_dir is not None
+    ]
     if missing_images:
-        print(f"Warning: missing originals for {len(missing_images)} mask(s) in {args.images_dir}.")
+        print(
+            f"Warning: missing originals for {len(missing_images)} mask(s) in {args.images_dir}."
+        )
 
     print(f"Visualizing {len(samples)} sample(s).")
     browser = MaskBrowser(samples)
